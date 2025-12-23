@@ -13,6 +13,6 @@ services:
       - SURREAL_NAMESPACE=open_notebook
       - SURREAL_DATABASE=production
     volumes:
-      - ./notebook_data:/app/data
-      - ./surreal_data:/mydata
+      - ./data/notebook_data:/app/data
+      - ./data/surreal_data:/mydata
     restart: always

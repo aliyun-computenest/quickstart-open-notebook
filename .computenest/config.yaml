@@ -1,0 +1,67 @@
+Service:
+  DeployType: ros
+  DeployMetadata:
+    SupplierDeployMetadata:
+      ArtifactRelation:
+        ecs_image_quickstart-open-notebook:
+          ArtifactId: ${Artifact.Artifact_1.ArtifactId}
+          ArtifactVersion: ${Artifact.Artifact_1.ArtifactVersion}
+      SupplierTemplateConfigs:
+        - Name: ECS单机版
+          Url: ros_templates/template1.yaml
+          PredefinedParameters: []
+    TemplateConfigs:
+      - Name: ECS单机版
+        Url: ros_templates/template1.yaml
+        PredefinedParameters: []
+        DeployScene: ECS
+        OutputConfigs:
+          - OutputKey: __biubiu__
+            EnableWebProxy: false
+    NetworkMetadata:
+      EnablePrivateVpcConnection: false
+      EnableReversePrivateVpcConnection: false
+    ServiceInstanceNameRule:
+      UseDefaultValue: false
+  OperationMetadata:
+    StatusOperationConfigs:
+      - TemplateName: ECS单机版
+        SupportOperations:
+          - Start
+          - Stop
+          - Restart
+    SupportBackup: true
+    PrometheusConfigMap:
+      ECS单机版:
+        EnablePrometheus: false
+    ModifyParametersConfig:
+      - TemplateName: ECS单机版
+        Operation:
+          - Name: 变更ECS实例规格
+            Description: 变更ECS实例规格
+            Type: Custom
+            Parameters:
+              - EcsInstanceType
+            SupportPredefinedParameters: false
+          - Name: 变更ECS实例密码
+            Description: 变更ECS实例密码
+            Type: Custom
+            Parameters:
+              - InstancePassword
+            SupportPredefinedParameters: false
+  ServiceType: private
+  ServiceInfo:
+    Locale: zh-CN
+    ShortDescription: 一个私密、多模型、100%本地化、功能齐全的 Notebook LM 替代方案。
+    Image: resources/icons/service_logo.png
+    Name: Open-notebook 社区版
+  ShareType: Public
+  ApprovalType: Manual
+Artifact:
+  Artifact_1:
+    ArtifactType: EcsImage
+    ArtifactName: ecs_image_quickstart-open-notebook
+    Description: quickstart-open-notebook EcsImage
+    ArtifactProperty:
+      RegionId: ap-southeast-1
+      ImageId: m-t4n3di3g9r06iqij6pig

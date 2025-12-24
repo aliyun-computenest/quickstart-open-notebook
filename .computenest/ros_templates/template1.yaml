@@ -1,0 +1,1024 @@
+ROSTemplateFormatVersion: '2015-09-01'
+Description:
+  zh-cn: 从镜像仓库部署单机容器应用
+  en: Deploy container application from image registry
+Locals:
+  EnvVarNameList:
+    Type: Eval
+    Value:
+      Fn::Jq:
+        - All
+        - .[] | .Name
+        - Ref: EnvVar
+  EnvVarValueList:
+    Type: Eval
+    Value:
+      Fn::Jq:
+        - All
+        - .[] | .Value
+        - Ref: EnvVar
+  EnvVarCount:
+    Type: Eval
+    Value:
+      Fn::Length:
+        Ref: EnvVar
+Parameters:
+  ApplicationName:
+    Type: String
+    Default: ''
+    Label:
+      zh-cn: 应用名称
+      en: Application Name
+  ApplicationGroupName:
+    Type: String
+    Label:
+      en: Application Group Name
+      zh-cn: 应用分组名称
+    Default: ''
+  Description:
+    Type: String
+    Label: 描述
+    Description: 当前部署物版本的描述
+    Default: ''
+  Platform:
+    Type: String
+    Label: 平台
+    Default: ''
+    Description: 中国内地ECS可能会出现GitHub连接不稳定，建议优先使用其他仓库。
+  Owner:
+    Type: String
+    Label: 所有者
+    Default: ''
+  Organization:
+    Type: String
+    Label: 组织
+    Default: ''
+  Repository:
+    Type: String
+    Label:
+      zh-cn: 仓库名称
+      en: Repository Name
+    Default: ''
+  Branch:
+    Type: String
+    Label:
+      en: Branch
+      zh-cn: 代码分支
+    Default: ''
+  CommitHash:
+    Type: String
+    Default: ''
+  WorkingDir:
+    Label: 工作目录
+    Type: String
+    Default: /root
+    AllowedPattern: ^\/
+    Description: 1) 应用的启动/停止脚本会以该目录作为执行的工作目录，<strong>请填写绝对路径</strong>。<br>2) 您可以填写尚不存在的目录，执行时会自动创建。
+  ApplicationStart:
+    Label: 应用启动脚本
+    Description: 注意-- <br>1) 每次执行应用启动脚本前都会<strong>默认先执行一下应用停止脚本</strong>，以确保之前部署的应用被正常停止。请确保应用停止脚本可以正确停止<strong>当前版本的应用以及历史版本的应用</strong>。 <br>2) 仅支持shell脚本
+    Type: String
+    MaxLength: 16384
+    AssociationProperty: ALIYUN::OOS::Command::CommandContent
+    AssociationPropertyMetadata:
+      CommandType: RunShellScript
+      ShowFullScreen: true
+      DynamicValue:
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - docker
+          Value: |-
+            ### 注意：Git仓库代码会自动下载到工作目录下的code_deploy_application文件夹，即 {工作目录}/code_deploy_application
+            ### Attention: The Git Repository code will be automatically downloaded to the code_deploy_application folder under the working directory, i.e. {WorkingDir}/code_deploy_application
+
+            DOCKERFILE_PATH="${DockerfilePath}"
+            DOCKER_NAME="${DockerName}"
+            PORT="${Port}"
+
+            # 执行构建过程
+            build() {
+              docker build -f $DOCKERFILE_PATH -t $DOCKER_NAME . --progress=plain
+              echo "build success"
+            }
+
+            # 启动docker服务
+            start() {
+              docker run --name $DOCKER_NAME --rm -p $PORT:$PORT -e PORT=$PORT -d $DOCKER_NAME:latest
+              echo "start success"
+            }
+
+            set -e
+            cd ./code_deploy_application
+            build
+            start
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - npm
+          Value: |-
+            ### 注意：Git仓库代码会自动下载到工作目录下的code_deploy_application文件夹，即 {工作目录}/code_deploy_application
+            ### Attention: The Git Repository code will be automatically downloaded to the code_deploy_application folder under the working directory, i.e. {WorkingDir}/code_deploy_application
+            # 执行构建过程
+            build() {
+              pnpm install
+              echo "build success"
+            }
+
+            PID_FILE="/var/log/application.pid"
+            # 启动npm服务
+            start() {
+              nohup pnpm run dev --port ${Port} > /var/log/application.log 2>&1 &
+              echo $! > $PID_FILE
+              echo "start success"
+            }
+
+            set -e
+            cd ./code_deploy_application
+            build
+            start
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - others
+          Value: |-
+            ### 注意：Git仓库代码会自动下载到工作目录下的code_deploy_application文件夹，即 {工作目录}/code_deploy_application
+            ### Attention: The Git Repository code will be automatically downloaded to the code_deploy_application folder under the working directory, i.e. {WorkingDir}/code_deploy_application
+            # 启动应用
+            start() {
+              # (可选)可在此补充启动应用逻辑，或待云资源拉起后再启动应用
+              echo "add script to start your application."
+            }
+
+            start
+  ApplicationStop:
+    Label: 应用停止脚本
+    Description: 注意-- <br>1) 请确保应用停止脚本可以正确停止<strong>当前版本的应用以及历史版本的应用</strong>。<br>2) 仅支持shell脚本
+    Type: String
+    MaxLength: 16384
+    AssociationProperty: ALIYUN::OOS::Command::CommandContent
+    AssociationPropertyMetadata:
+      CommandType: RunShellScript
+      ShowFullScreen: true
+      DynamicValue:
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - docker
+          Value: |-
+            ### 停止应用（如果有）
+            ### Stop the application (if any)
+            docker stop ${DockerName}
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - npm
+          Value: |-
+            ### 停止应用（如果有）
+            ### Stop the application (if any)
+            PID_FILE="/var/log/application.pid"
+            if [ -f "$PID_FILE" ]; then
+              PID=$(cat "$PID_FILE")
+              kill $(pgrep -P $PID)
+              rm -f "$PID_FILE"
+            fi
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - others
+          Value: |-
+            ### 停止应用（如果有）
+            ### Stop the application (if any)
+  ArtifactSourceType:
+    Type: String
+    Default: npm
+    Label:
+      en: artifact source type
+      zh-cn: 部署类型
+    AllowedValues:
+      - docker
+      - npm
+      - others
+    AssociationPropertyMetadata:
+      AutoSelectFirst: true
+      ForceRadio: true
+  DockerfilePath:
+    Type: String
+    Label:
+      en: Dockerfile Path
+      zh-cn: Dockerfile 路径
+    Description:
+      en: The path of the Repository where the Dockerfile is located.
+      zh-cn: 指定 Dockerfile 路径，路径应当为基于源仓库的相对路径。
+    Default: Dockerfile
+    AssociationProperty: ALIYUN::OOS::GitContent::Content
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${ArtifactSourceType}
+            - docker
+  DockerName:
+    Type: String
+    Default: myapp
+    Label:
+      en: Docker镜像名
+      zh-cn: Docker镜像名
+    Description:
+      en: Docker Image Name
+      zh-cn: 通过Dockerfile构建镜像的名称
+    AllowedPattern: '[0-9a-z_.-]'
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${ArtifactSourceType}
+            - docker
+  RepoName:
+    Type: String
+    Default: ''
+  CreateEcsOption:
+    Type: String
+    Default: ExistECS
+    AllowedValues:
+      - ExistECS
+      - NewECS
+    AssociationPropertyMetadata:
+      ValueLabelMapping:
+        ExistECS:
+          zh-cn: 已有ECS
+          en: Existing ECS
+        NewECS:
+          zh-cn: 新建ECS
+          en: New ECS
+    Label:
+      en: Select ECS
+      zh-cn: 选择ECS实例
+  PackageName:
+    Type: String
+    AssociationPropertyMetadata:
+      DynamicValue:
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - docker
+          Value: ACS-Extension-DockerCE-1853370294850618
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - npm
+          Value: ACS-Extension-node-1853370294850618
+        - Condition:
+            Fn::Equals:
+              - ${ArtifactSourceType}
+              - others
+          Value: ACS-Extension-DockerCE-1853370294850618
+  InstanceId:
+    Type: String
+    Description:
+      en: The ID of ECS in which application deployed.
+      zh-cn: 部署应用程序的ECS实例ID
+    AllowedPattern: '[0-9a-z]+$'
+    Default: null
+    Required: true
+    Label:
+      en: ECS Instance ID
+      zh-cn: ECS实例ID
+    AssociationProperty: 'ALIYUN::ECS::Instance::InstanceId'
+    AssociationPropertyMetadata:
+      OnlyShowSelector: true
+      RegionId: ${RegionId}
+      Status: Running
+      OSType: linux
+      NetworkType: vpc
+      DisabledStatus: true
+      PackageName: ${PackageName}
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - ExistECS
+  ChargeType:
+    Label:
+      zh-cn: 付费类型
+      en: Pay type
+    Type: String
+    AllowedValues:
+      - PostPaid
+      - PrePaid
+    Default: PostPaid
+    AssociationProperty: ChargeType
+    AssociationPropertyMetadata:
+      LocaleKey: ChargeType
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+  PeriodUnit:
+    AssociationProperty: PayPeriodUnit
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::And:
+            - Fn::Equals:
+                - ${CreateEcsOption}
+                - NewECS
+            - Fn::Not:
+                Fn::Equals:
+                  - ${ChargeType}
+                  - PostPaid
+    Default: Month
+    AllowedValues:
+      - Month
+    Label:
+      zh-cn: 购买资源周期
+      en: Pay period unit
+    Type: String
+  Period:
+    AssociationProperty: PayPeriod
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::And:
+            - Fn::Equals:
+                - ${CreateEcsOption}
+                - NewECS
+            - Fn::Not:
+                Fn::Equals:
+                  - ${ChargeType}
+                  - PostPaid
+    Default: 1
+    Label:
+      zh-cn: 购买资源时长
+      en: Prepaid resource pay period
+    AllowedValues:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 12
+      - 24
+      - 36
+      - 48
+      - 60
+    Type: Number
+  EcsInstanceType:
+    Type: String
+    Label:
+      en: Instance Type
+      zh-cn: 实例类型
+    Default: ecs.u1-c1m1.large
+    AssociationProperty: ALIYUN::ECS::Instance::InstanceType
+    AssociationPropertyMetadata:
+      InstanceChargeType: ${ChargeType}
+      ZoneId: ${ZoneId}
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+  SystemDiskCategory:
+    Type: String
+    Default: cloud_essd
+    AllowedValues:
+      - cloud_efficiency
+      - cloud_essd
+      - cloud_essd_entry
+    Label:
+      en: System Disk Category
+      zh-cn: 系统盘类型
+    AssociationPropertyMetadata:
+      LocaleKey: DiskCategory
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+  SystemDiskSize:
+    Type: Number
+    Description:
+      zh-cn: 系统盘大小, 取值范围：[20, 500], 单位：GB。
+      en: 'System disk size of each node, range of values: 20-500, units: GB.'
+    MinValue: 20
+    MaxValue: 500
+    Default: 40
+    Label:
+      zh-cn: 系统盘空间(GB)
+      en: System Disk Space
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+  InternetMaxBandwidthOut:
+    Type: Number
+    Label:
+      zh-cn: 公网出带宽最大值(Mbps)
+      en: Internet Max Bandwidth Out
+    MinValue: 0
+    MaxValue: 100
+    Default: 10
+    Description:
+      zh-cn: 公网出带宽最大值, 取值范围0-100，单位Mbps。0为关闭公网。
+      en: 'Internet Max Bandwidth Out,range of values: 1-100'
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+  InternetChargeType:
+    Type: String
+    Label:
+      zh-cn: 网络付费类型
+      en: Internet Charge Type
+    Default: PayByTraffic
+    AllowedValues:
+      - PayByBandwidth
+      - PayByTraffic
+    AssociationPropertyMetadata:
+      LocaleKey: InternetChargeType
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+  Port:
+    Type: Number
+    Label:
+      en: Application listen port
+      zh-cn: 应用监听端口
+    Description:
+      en: The port application process listens to. Port will be passed to application as environment variable PORT. If application code does not support setting port through environment variable, please set to the default port that application code listens to
+      zh-cn: 应用程序进程监听的端口。端口会作为环境变量PORT传递给应用。如果应用代码不支持通过环境变量设置端口，请填写应用代码默认监听的端口
+    MaxValue: 65535
+    MinValue: 0
+    AssociationPropertyMetadata:
+      DynamicValue:
+        - Condition:
+            Fn::Equals:
+              - npm
+              - ${ArtifactSourceType}
+          Value: 3000
+        - Condition:
+            Fn::Equals:
+              - docker
+              - ${ArtifactSourceType}
+          Value: 80
+        - Condition:
+            Fn::Equals:
+              - others
+              - ${ArtifactSourceType}
+          Value: 80
+  ZoneId:
+    Type: String
+    Label:
+      zh-cn: 可用区
+      en: Zone
+    Required:
+      Fn::Equals:
+        - ${CreateEcsOption}
+        - NewECS
+    Default: cn-hangzhou-b
+    AssociationProperty: ALIYUN::ECS::Instance::ZoneId
+    AssociationPropertyMetadata:
+      AutoSelectFirst: true
+      InstanceChargeType: ${ChargeType}
+      SystemDiskCategory: ${SystemDiskCategory}
+      InstanceType: ${EcsInstanceType}
+      DefaultValueStrategy: first
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+  VpcOption:
+    Type: String
+    Label:
+      en: Select VPC
+      zh-cn: 选择专有网络
+    AllowedValues:
+      - NewVPC
+      - ExistingVPC
+    AssociationPropertyMetadata:
+      ValueLabelMapping:
+        NewVPC:
+          zh-cn: 新建专有网络
+          en: New VPC
+        ExistingVPC:
+          zh-cn: 已有专有网络
+          en: Existing VPC
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+    Required:
+      Fn::Equals:
+        - ${CreateEcsOption}
+        - NewECS
+    Default: NewVPC
+  VpcId:
+    Type: String
+    Label:
+      en: VPC ID
+      zh-cn: 专有网络VPC实例ID
+    AssociationProperty: ALIYUN::ECS::VPC::VPCId
+    AssociationPropertyMetadata:
+      AutoSelectFirst: true
+      Visible:
+        Condition:
+          Fn::And:
+            - Fn::Equals:
+                - ${CreateEcsOption}
+                - NewECS
+            - Fn::Equals:
+                - ExistingVPC
+                - ${VpcOption}
+    Required:
+      Fn::And:
+        - Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+        - Fn::Equals:
+            - ExistingVPC
+            - ${VpcOption}
+    Default: ''
+  VSwitchId:
+    Type: String
+    Label:
+      en: VSwitch ID
+      zh-cn: 交换机实例ID
+    Required:
+      Fn::And:
+        - Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+        - Fn::Equals:
+            - ExistingVPC
+            - ${VpcOption}
+    AssociationProperty: ALIYUN::ECS::VSwitch::VSwitchId
+    AssociationPropertyMetadata:
+      AutoSelectFirst: true
+      VpcId: ${VpcId}
+      ZoneId: ${ZoneId}
+      Visible:
+        Condition:
+          Fn::And:
+            - Fn::Equals:
+                - ${CreateEcsOption}
+                - NewECS
+            - Fn::Equals:
+                - ExistingVPC
+                - ${VpcOption}
+    Default: ''
+  VpcCidrBlock:
+    Type: String
+    Label:
+      en: VPC CIDR IPv4 Block
+      zh-cn: 专有网络IPv4网段
+    Description:
+      zh-cn: VPC的ip地址段范围，您可以使用以下的ip地址段或其子网:<br><font color='green'>[10.0.0.0/8]</font><br><font color='green'>[172.16.0.0/12]</font><br><font color='green'>[192.168.0.0/16]</font>
+      en: 'The ip address range of the VPC in the CidrBlock form; <br>You can use the following ip address ranges and their subnets: <br><font color=''green''>[10.0.0.0/8]</font><br><font color=''green''>[172.16.0.0/12]</font><br><font color=''green''>[192.168.0.0/16]</font>'
+    Default: 192.168.0.0/16
+    Required:
+      Fn::And:
+        - Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+        - Fn::Equals:
+            - NewVPC
+            - ${VpcOption}
+    AssociationProperty: ALIYUN::VPC::VPC::CidrBlock
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::And:
+            - Fn::Equals:
+                - ${CreateEcsOption}
+                - NewECS
+            - Fn::Equals:
+                - NewVPC
+                - ${VpcOption}
+  VSwitchCidrBlock:
+    Type: String
+    Label:
+      en: VSwitch CIDR Block
+      zh-cn: 交换机子网网段
+    Description:
+      zh-cn: 必须属于VPC的子网段
+      en: Must belong to the subnet segment of VPC.
+    Default: 192.168.0.0/24
+    Required:
+      Fn::And:
+        - Fn::Equals:
+            - ${CreateEcsOption}
+            - NewECS
+        - Fn::Equals:
+            - NewVPC
+            - ${VpcOption}
+    AssociationProperty: ALIYUN::VPC::VSwitch::CidrBlock
+    AssociationPropertyMetadata:
+      VpcCidrBlock: VpcCidrBlock
+      Visible:
+        Condition:
+          Fn::And:
+            - Fn::Equals:
+                - ${CreateEcsOption}
+                - NewECS
+            - Fn::Equals:
+                - NewVPC
+                - ${VpcOption}
+  EnvVar:
+    Type: Json
+    Label:
+      en: Environment variables
+      zh-cn: 环境变量
+    Description:
+      en: Environment variables for the container. Some applications need to set environment variables to start normally, some applications support initialization through environment variables such as setting the initial account and password for the application
+      zh-cn: 设置容器的环境变量。有些应用程序需要设置环境变量才能正常启动，有些应用程序支持通过环境变量来初始化比如设置应用的初始账号和密码
+    AssociationProperty: List[Parameters]
+    AssociationPropertyMetadata:
+      Parameters:
+        Name:
+          Type: String
+        Value:
+          Type: String
+    Default: []
+Conditions:
+  IsNpm:
+    Fn::Equals:
+      - Ref: ArtifactSourceType
+      - npm
+  CreateEcs:
+    Fn::Equals:
+      - Ref: CreateEcsOption
+      - NewECS
+  ExistEcs:
+    Fn::Equals:
+      - Ref: CreateEcsOption
+      - ExistECS
+  ExistEnvVar:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: EnvVarCount
+          - 0
+Resources:
+  ECSInstanceResource:
+    Type: DATASOURCE::ECS::Instances
+    Properties:
+      InstanceIds:
+        Fn::If:
+          - ExistEcs
+          - - Ref: InstanceId
+          - Fn::GetAtt:
+              - EcsInstanceGroup
+              - InstanceIds
+  RandomPassword:
+    Condition: CreateEcs
+    Type: ALIYUN::RandomString
+    Properties:
+      length: 16
+      character_classes:
+        - class: "lowercase"
+          min: 4
+        - class: "uppercase"
+          min: 4
+        - class: "digits"
+          min: 4
+      character_sequences:
+        - sequence: "!@#$^*-+="
+  VpcModule:
+    Condition: CreateEcs
+    Type: MODULE::ACS::ComputeNest::VpcAndVSwitch
+    Version: default
+    Properties:
+      ZoneId:
+        Ref: ZoneId
+      VpcOption:
+        Ref: VpcOption
+      VpcId:
+        Ref: VpcId
+      VSwitchId:
+        Ref: VSwitchId
+      VSwitchCidrBlock:
+        Ref: VSwitchCidrBlock
+      VpcCidrBlock:
+        Ref: VpcCidrBlock
+  EcsSecurityGroup:
+    Condition: CreateEcs
+    Type: ALIYUN::ECS::SecurityGroup
+    Properties:
+      VpcId:
+        Fn::GetAtt:
+          - VpcModule
+          - VpcId
+      SecurityGroupIngress:
+        - PortRange: 22/22
+          Priority: 1
+          SourceCidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+        - SourceCidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          PortRange:
+            Fn::Sub: ${Port}/${Port}
+  EcsInstanceGroup:
+    Condition: CreateEcs
+    Type: ALIYUN::ECS::InstanceGroup
+    Properties:
+      UpdatePolicy: ForAllInstances
+      IoOptimized: optimized
+      ZoneId:
+        Ref: ZoneId
+      VpcId:
+        Fn::GetAtt:
+          - VpcModule
+          - VpcId
+      InstanceChargeType:
+        Ref: ChargeType
+      SecurityGroupId:
+        Ref: EcsSecurityGroup
+      SystemDiskCategory: cloud_essd
+      SystemDiskSize:
+        Ref: SystemDiskSize
+      ImageId:
+        Fn::If:
+          - IsNpm
+          - '{{ resolve:oos:aliyun/services/computenest/images/aliyun_3_2104_nodejs_20 }}'
+          - '{{ resolve:oos:aliyun/services/computenest/images/aliyun_3_2104_docker_26 }}'
+      PeriodUnit:
+        Ref: PeriodUnit
+      VSwitchId:
+        Fn::GetAtt:
+          - VpcModule
+          - VSwitchId
+      Period:
+        Ref: Period
+      InstanceType:
+        Ref: EcsInstanceType
+      MaxAmount: 1
+      Password:
+        Fn::GetAtt:
+          - RandomPassword
+          - value
+      AllocatePublicIP: true
+      InternetMaxBandwidthOut:
+        Ref: InternetMaxBandwidthOut
+      InternetChargeType:
+      Tags:
+        - Key:
+            Fn::Join:
+              - '-'
+              - - 'app'
+                - Ref: ApplicationName
+          Value:
+            Ref: ApplicationGroupName
+  TagResourcesExecution:
+    Type: ALIYUN::OOS::Execution
+    Condition: ExistEcs
+    Properties:
+      Parameters:
+        regionId:
+          Ref: ALIYUN::Region
+        resourceIds:
+          - Ref: InstanceId
+        resourceType: ACS::ECS::Instance
+        tags:
+          Fn::Sub:
+            - '{"app-${applicationName}":"${applicationGroupName}"}'
+            - applicationName:
+                Ref: ApplicationName
+              applicationGroupName:
+                Ref: ApplicationGroupName
+      TemplateName: ACS-TAG-TagResources
+  InstallPackageExecution:
+    Type: 'ALIYUN::OOS::Execution'
+    DependsOn:
+      - TagResourcesExecution
+    Condition: ExistEcs
+    Properties:
+      ResourceOptions:
+        CancelOnDelete: true
+      TemplateName: "ACS-ECS-BulkyConfigureOOSPackageWithTemporaryURL"
+      SafetyCheck: Skip
+      Parameters:
+        regionId:
+          Ref: ALIYUN::Region
+        action: "install"
+        packageName:
+          Ref: PackageName
+        targets:
+          Type: ResourceIds
+          ResourceIds:
+            - Ref: InstanceId
+          RegionId:
+            Ref: ALIYUN::Region
+  EnvVarParameter:
+    Type: ALIYUN::OOS::Parameter
+    Condition: ExistEnvVar
+    Count:
+      Ref: EnvVarCount
+    Properties:
+      Type: String
+      Value:
+        Fn::Select:
+          - Ref: ALIYUN::Index
+          - Ref: EnvVarValueList
+      Name:
+        Fn::Join:
+          - ''
+          - - Fn::Sub:
+                - applicationManagement/codeDeploy/${applicationName}/${applicationGroupName}/
+                - applicationName:
+                    Ref: ApplicationName
+                  applicationGroupName:
+                    Ref: ApplicationGroupName
+            - Fn::Select:
+                - Ref: ALIYUN::Index
+                - Ref: EnvVarNameList
+  DeployRevision:
+    Type: ALIYUN::OOS::DeployRevision
+    DependsOn:
+      - EnvVarParameter
+      - EcsInstanceGroup
+      - InstallPackageExecution
+    Properties:
+      RegionId: cn-hangzhou
+      ApplicationName:
+        Ref: ApplicationName
+      RevisionType: GitRepo
+      Description:
+        Ref: Description
+      Hooks:
+        workingDir:
+          Ref: WorkingDir
+        applicationStart:
+          Ref: ApplicationStart
+        applicationStop:
+          Ref: ApplicationStop
+      Location:
+        platform:
+          Ref: Platform
+        owner:
+          Ref: Owner
+        organization:
+          Ref: Organization
+        repository:
+          Ref: Repository
+        branch:
+          Ref: Branch
+        commitId:
+          Ref: Branch
+  ApplicationGroupDeployment:
+    DependsOn:
+      - DeployRevision
+    Type: ALIYUN::OOS::ApplicationGroupDeployment
+    Properties:
+      RegionId: cn-hangzhou
+      Name:
+        Ref: ApplicationGroupName
+      ApplicationName:
+        Ref: ApplicationName
+      RevisionId:
+        Fn::GetAtt:
+          - DeployRevision
+          - RevisionId
+      DeployParameters:
+        Fn::Sub:
+          - "{\"StartExecutionParameters\":\"{\\\"Parameters\\\":\\\"{\\\\\\\"applicationName\\\\\\\":\\\\\\\"${applicationName}\\\\\\\",\\\\\\\"applicationGroupName\\\\\\\":\\\\\\\"${applicationGroupName}\\\\\\\",\\\\\\\"deployRevisionId\\\\\\\":\\\\\\\"${deployRevisionId}\\\\\\\",\\\\\\\"deployMethod\\\\\\\":\\\\\\\"all\\\\\\\",\\\\\\\"batchNumber\\\\\\\":1}\\\"}\"}"
+          - applicationName:
+              Ref: ApplicationName
+            applicationGroupName:
+              Ref: ApplicationGroupName
+            deployRevisionId:
+              Fn::GetAtt:
+                - DeployRevision
+                - RevisionId
+Outputs:
+  endpoint:
+    Label:
+      zh-cn: 应用访问入口
+      en: Application endpoint
+    Description:
+      zh-cn: 应用访问入口。如果访问端口与应用端口不一致，将无法访问到应用。
+      en: Application endpoint. If the access port is different from the application port, you will not be able to access the application.
+    Value:
+      Fn::Sub:
+        - http://${ServerAddress}:${Port}
+        - ServerAddress:
+            Fn::Jq:
+              - First
+              - 'if .PublicIpAddress | length > 0 then .PublicIpAddress[0] else .PrivateIpAddress[0] end'
+              - PrivateIpAddress:
+                  Fn::Jq:
+                    - First
+                    - .[0].PrivateIpAddress
+                    - Fn::GetAtt:
+                        - ECSInstanceResource
+                        - Instances
+                PublicIpAddress:
+                  Fn::Jq:
+                    - First
+                    - .[0].PublicIpAddress
+                    - Fn::GetAtt:
+                        - ECSInstanceResource
+                        - Instances
+  connectServer:
+    Label:
+      zh-cn: 远程连接云服务器
+      en: Connect to ECS instance
+    Description:
+      zh-cn: 通过Workbench远程连接云服务器
+      en: Connect to ECS instance via Workbench
+    Value:
+      Fn::Sub:
+        - '<a href="https://ecs-workbench.aliyun.com/?from=ecs&instanceType=ecs&regionId=${RegionId}&instanceId=${InstanceId}" target="_blank" rel="noopener noreferrer"> 登录链接 </a>'
+        - InstanceId:
+            Fn::If:
+              - CreateEcs
+              - Fn::Select:
+                  - 0
+                  - Fn::GetAtt:
+                      - EcsInstanceGroup
+                      - InstanceIds
+              - Ref: InstanceId
+          RegionId:
+            Ref: ALIYUN::Region
+  InstancePassword:
+    NoEcho: 'True'
+    Condition: CreateEcs
+    Label:
+      en: Ecs Instance password
+      zh-cn: ECS实例密码
+    Description:
+      en: Initial instance password
+      zh-cn: ECS实例密码
+    Value:
+      Fn::GetAtt:
+        - RandomPassword
+        - value
+Mappings: {}
+Metadata:
+  ALIYUN::ROS::Interface:
+    ParameterGroups:
+      - Parameters:
+          - CreateEcsOption
+          - InstanceId
+          - EcsInstanceType
+          - SystemDiskCategory
+          - SystemDiskSize
+          - InternetChargeType
+          - InternetMaxBandwidthOut
+          - ChargeType
+          - PeriodUnit
+          - Period
+        Label:
+          zh-cn: 云资源配置
+          en: Resource Configuration
+      - Parameters:
+          - ArtifactSourceType
+          - DockerfilePath
+          - DockerName
+          - Port
+          - WorkingDir
+          - ApplicationStart
+          - ApplicationStop
+        Label:
+          zh-cn: 软件配置
+          en: Environment Configuration
+      - Parameters:
+          - EnvVar
+        Label:
+          zh-cn: 高级配置
+          en: Advanced Configuration
+        DefaultExpand: false
+      - Parameters:
+          - ZoneId
+          - VpcOption
+          - VpcId
+          - VSwitchId
+          - VpcCidrBlock
+          - VSwitchCidrBlock
+        Label:
+          zh-cn: 网络配置
+          en: Netowrk configuration
+        DefaultExpand: false
+    Hidden:
+      - Repository
+      - Branch
+      - ApplicationName
+      - ApplicationGroupName
+      - Description
+      - Platform
+      - Owner
+      - Organization
+      - CommitHash
+      - RepoName
+      - PackageName

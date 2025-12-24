@@ -28,4 +28,4 @@ Open Notebook 是一个私有、多模型、100%本地化、功能齐全的 Note
 
 ## 官方网站
 
-更多信息请访问官方文档：[官网链接](https://market.aliyun.com/store/4925945/index.html)
+更多信息请访问官方文档：[官网链接](https://www.open-notebook.ai/basics.html)
